@@ -170,74 +170,143 @@ def main():
         col1, col2 = st.columns([3, 1])
 
         with col1:
-            # Create a base map
-            m = folium.Map(location=[37.0902, -95.7129], zoom_start=4, tiles="cartodbdark_matter")
-            colormap = LinearColormap(colors=['red', 'yellow', 'green'], vmin=stats_df['mean'].min(), vmax=stats_df['mean'].max())
+            # Ensure we have valid data for all points
+            mean_lons = []
+            mean_lats = []
+            mean_texts = []
+            mean_colors = []
+            
+            median_lons = []
+            median_lats = []
+            median_texts = []
+            median_colors = []
 
-            # Add markers for mean and median
             for _, row in stats_df.iterrows():
-                # Mean marker (circle)
-                folium.CircleMarker(
-                    location=[filtered_df[filtered_df['geo_name'] == row['mean_county']]['latitude'].values[0],
-                            filtered_df[filtered_df['geo_name'] == row['mean_county']]['longitude'].values[0]],
-                    radius=6,
-                    popup=f"State: {row['state']}<br>Mean: {row['mean']:.2f}<br>County: {row['mean_county']}",
-                    color='blue',
-                    fill=True,
-                    fillColor='blue',
-                    fillOpacity=0.7
-                ).add_to(m)
+                # Mean data
+                mean_county_data = filtered_df[filtered_df['geo_name'] == row['mean_county']]
+                if not mean_county_data.empty:
+                    mean_lons.append(mean_county_data['longitude'].values[0])
+                    mean_lats.append(mean_county_data['latitude'].values[0])
+                    mean_texts.append(f"State: {row['state']}<br>Mean: {row['mean']:.2f}<br>County: {row['mean_county']}")
+                    mean_colors.append(row['mean'])
 
-                # Median marker (diamond)
-                folium.RegularPolygonMarker(
-                    location=[filtered_df[filtered_df['geo_name'] == row['median_county']]['latitude'].values[0],
-                            filtered_df[filtered_df['geo_name'] == row['median_county']]['longitude'].values[0]],
-                    number_of_sides=4,
-                    radius=5,
-                    rotation=45,
-                    popup=f"State: {row['state']}<br>Median: {row['median']:.2f}<br>County: {row['median_county']}",
-                    color='red',
-                    fill=True,
-                    fillColor='red',
-                    fillOpacity=0.7
-                ).add_to(m)
+                # Median data
+                median_county_data = filtered_df[filtered_df['geo_name'] == row['median_county']]
+                if not median_county_data.empty:
+                    median_lons.append(median_county_data['longitude'].values[0])
+                    median_lats.append(median_county_data['latitude'].values[0])
+                    median_texts.append(f"State: {row['state']}<br>Median: {row['median']:.2f}<br>County: {row['median_county']}")
+                    median_colors.append(row['median'])
+
+            # Create traces only if we have data
+            data = []
+            
+            if mean_lons:
+                mean_data = go.Scattergeo(
+                    lon=mean_lons,
+                    lat=mean_lats,
+                    text=mean_texts,
+                    mode='markers',
+                    name='Mean Life Expectancy',
+                    marker=dict(
+                        size=10,
+                        color=mean_colors,
+                        colorscale='RdYlGn',
+                        colorbar=dict(
+                            title='Life Expectancy (years)',
+                            x=1.1  # Adjust position of colorbar
+                        ),
+                        cmin=min(stats_df['mean'].min(), stats_df['median'].min()),
+                        cmax=max(stats_df['mean'].max(), stats_df['median'].max()),
+                        symbol='circle'
+                    ),
+                    hoverinfo='text'
+                )
+                data.append(mean_data)
+
+            if median_lons:
+                median_data = go.Scattergeo(
+                    lon=median_lons,
+                    lat=median_lats,
+                    text=median_texts,
+                    mode='markers',
+                    name='Median Life Expectancy',
+                    marker=dict(
+                        size=10,
+                        color=median_colors,
+                        colorscale='RdYlGn',
+                        cmin=min(stats_df['mean'].min(), stats_df['median'].min()),
+                        cmax=max(stats_df['mean'].max(), stats_df['median'].max()),
+                        symbol='diamond'
+                    ),
+                    hoverinfo='text'
+                )
+                data.append(median_data)
+
+            # Create the layout
+            layout = go.Layout(
+                geo=dict(
+                    scope='usa',
+                    projection_type='albers usa',
+                    showland=True,
+                    landcolor='rgb(20, 20, 20)',
+                    countrycolor='rgb(40, 40, 40)',
+                    showlakes=True,
+                    lakecolor='rgb(20, 20, 20)',
+                    subunitcolor='rgb(40, 40, 40)'
+                ),
+                paper_bgcolor='rgb(10, 10, 10)',
+                plot_bgcolor='rgb(10, 10, 10)',
+                margin=dict(l=0, r=0, t=0, b=0),
+                showlegend=True,
+                legend=dict(
+                    x=0,
+                    y=1,
+                    bgcolor='rgba(0,0,0,0.5)',
+                    font=dict(color='white')
+                )
+            )
+
+            # Create the figure
+            fig = go.Figure(data=data, layout=layout)
+            
+            # Update layout for dark theme compatibility
+            fig.update_layout(
+                height=600,
+                font=dict(color='white'),
+            )
 
             # Display the map
-            folium_static(m)
+            st.plotly_chart(fig, use_container_width=True)
 
         with col2:
             st.subheader("Legend")
             
-            # Mean marker legend
-            st.markdown(
-                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
-                '<div style="width: 20px; height: 20px; border-radius: 50%; background-color: blue; margin-right: 10px;"></div>'
-                '<span>Mean Life Expectancy</span>'
-                '</div>',
-                unsafe_allow_html=True
-            )
+            # Explanatory text
+            st.markdown("""
+            The map shows two key statistics for each state:
+            - **Circles**: Mean Life Expectancy
+            - **Diamonds**: Median Life Expectancy
             
-            # Median marker legend
-            st.markdown(
-                '<div style="display: flex; align-items: center; margin-bottom: 10px;">'
-                '<div style="width: 20px; height: 20px; transform: rotate(45deg); background-color: red; margin-right: 10px;"></div>'
-                '<span>Median Life Expectancy</span>'
-                '</div>',
-                unsafe_allow_html=True
-            )
+            Colors indicate life expectancy values:
+            - Red: Lower life expectancy
+            - Yellow: Medium life expectancy
+            - Green: Higher life expectancy
             
-            # Colormap legend
-            st.write("Life Expectancy (years)")
-            colormap_html = f'''
-            <div style="display: flex; flex-direction: column; align-items: stretch;">
-                <div style="height: 20px; background: linear-gradient(to right, red, yellow, green);"></div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>{stats_df['mean'].min():.1f}</span>
-                    <span>{stats_df['mean'].max():.1f}</span>
-                </div>
-            </div>
-            '''
-            st.markdown(colormap_html, unsafe_allow_html=True)
+            Hover over points to see detailed information.
+            """)
+            
+            # Display summary statistics
+            st.write("### Summary Statistics")
+            st.write(f"Lowest Life Expectancy: {min(stats_df['mean'].min(), stats_df['median'].min()):.1f} years")
+            st.write(f"Highest Life Expectancy: {max(stats_df['mean'].max(), stats_df['median'].max()):.1f} years")
+            st.write(f"Average Life Expectancy: {((stats_df['mean'].mean() + stats_df['median'].mean()) / 2):.1f} years")
+            
+            # Add filter information
+            if selected_state != "All":
+                st.write(f"### Current Filter")
+                st.write(f"State: {selected_state}")
+            st.write(f"Year: {selected_year}")
 
         # Correlation and Regression Analysis
         st.header("Correlation and Regression Analysis")
