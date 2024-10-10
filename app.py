@@ -9,7 +9,7 @@ import folium
 from streamlit_folium import folium_static
 from branca.colormap import LinearColormap
 import os
-
+import pickle
 
 # Set page config
 st.set_page_config(page_title="U.S. Life Expectancy Explorer", layout="wide")
@@ -25,7 +25,167 @@ def load_data():
     df = pd.read_csv(data_path)
     return df
 
+
+
+selected_features = [
+    'premature_mortality', 'median_household_income', 'pct_65_and_older', 
+    'driving_alone_to_work', 'injury_deaths', 'adult_obesity', 'frequent_mental_distress', 
+    'single_parent_households', 'air_pollution_particulate_matter', 'median_age', 
+    'adult_smoking', 'mammography_screening', 'housing_cost_challenges', 
+    'social_associations', 'excessive_drinking', 'insufficient_sleep', 'pct_under_18', 
+    'high_school_graduation', 'ratio_of_pop_to_dentists', 'uninsured_adults', 
+    'preventable_hospital_stays', 'homeownership', 'poverty', 
+    'children_in_poverty', 'unemployment_rate'
+]
+
+
+
+# Custom CSS to enhance the UI
+custom_css = """
+<style>
+    .stApp {
+        background-color: #000000;
+    }
+    .main > div {
+        padding-top: 2rem;
+    }
+    .stSlider > div > div > div {
+        background-color: #4e79a700;
+    }
+    .stSlider > div > div > div > div {
+        color: white;
+    }
+    .stSlider > div > div > div > div > div {
+        background-color: transparent !important;
+    }
+    .stPlotlyChart {
+        background-color: white;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px 0 rgba(0,0,0,0.16);
+    }
+    .css-1d391kg {
+        background-color: #ffffff;
+        border-radius: 5px;
+        padding: 1rem;
+        box-shadow: 0 2px 5px 0 rgba(0,0,0,0.16);
+    }
+</style>
+"""
+
+
+@st.cache_resource
+def load_model_and_scaler():
+    try:
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(BASE_DIR, "models", "xgboost_best_selected_model.pkl")
+        scaler_path = os.path.join(BASE_DIR, "models", "scaler.pkl")
+        
+        if not os.path.exists(model_path) or not os.path.exists(scaler_path):
+            st.warning("Model or scaler file not found.")
+            return None, None
+        
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+        with open(scaler_path, 'rb') as f:
+            scaler = pickle.load(f)
+        
+        return model, scaler
+    except Exception as e:
+        st.error(f"Error loading model or scaler: {str(e)}")
+        return None, None
+
+# Load data and model at app startup
 df = load_data()
+model, scaler = load_model_and_scaler()
+
+
+def predict_life_expectancy():
+    global df, model, scaler  # Use global variables
+
+    st.title("🧬 Life Expectancy Predictor")
+    st.write("Explore how community health indicators affect life expectancy. Adjust the sliders to see real-time changes in the prediction.")
+    
+    # Get feature ranges from the dataset
+    feature_ranges = get_feature_ranges()
+    input_dict = {}
+    
+    st.sidebar.header("Community Health Indicators")
+    for feature, (min_val, max_val) in feature_ranges.items():
+        # Calculate a sensible default value (e.g., median)
+        default_val = df[feature].median()
+        input_dict[feature] = st.sidebar.slider(
+            feature.replace('_', ' ').title(),
+            min_value=float(min_val),
+            max_value=float(max_val),
+            value=float(default_val),
+            key=feature
+        )
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Community Health Indicators Visualization")
+        polar_area_chart = get_polar_area_chart(input_dict)
+        st.plotly_chart(polar_area_chart, use_container_width=True)
+    
+    with col2:
+        st.subheader("Life Expectancy Prediction")
+        if st.button("Predict Life Expectancy", key="predict_button", help="Click to calculate the predicted life expectancy based on current inputs"):
+            input_array = np.array([input_dict[feature] for feature in selected_features]).reshape(1, -1)
+            scaled_input = scaler.transform(input_array)
+            prediction = model.predict(scaled_input)[0]
+            st.markdown(f"<h1 style='text-align: center; color: #4e79a7;'>{prediction:.2f} years</h1>", unsafe_allow_html=True)
+            st.info("This prediction is based on community health indicators and should not be used as a substitute for professional medical advice.")
+        
+        st.markdown("### How it works")
+        st.write("1. Adjust the sliders in the sidebar to input community health indicators.")
+        st.write("2. The polar area chart updates in real-time to visualize your inputs.")
+        st.write("3. Click 'Predict Life Expectancy' to see the estimated life expectancy based on your inputs.")
+        st.write("4. Experiment with different combinations to see how various factors affect life expectancy.")
+
+def get_polar_area_chart(input_data):
+    feature_ranges = get_feature_ranges()
+    normalized_data = {}
+    for feature, value in input_data.items():
+        min_val, max_val = feature_ranges[feature]
+        normalized_data[feature] = (value - min_val) / (max_val - min_val)
+
+    categories = list(normalized_data.keys())
+    values = list(normalized_data.values())
+    
+    fig = go.Figure(go.Barpolar(
+        r=values,
+        theta=categories,
+        opacity=0.8,
+        marker=dict(
+            color=values,
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title='Normalized Value')
+        )
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, 1]),
+            angularaxis=dict(direction="clockwise")
+        ),
+        showlegend=False,
+        height=600,
+        margin=dict(l=80, r=80, t=20, b=20),
+        title="Community Health Indicators"
+    )
+    return fig
+
+
+def get_feature_ranges():
+    global df  # Use global df
+    feature_ranges = {}
+    for feature in selected_features:
+        min_val = df[feature].min()
+        max_val = df[feature].max()
+        feature_ranges[feature] = (min_val, max_val)
+    return feature_ranges
 
 
 # Function to encode video file to base64
@@ -64,11 +224,26 @@ def set_video_background(video_file):
     )
 
 
+
+
 # Main function to run the app
 def main():
     st.sidebar.title("Navigation")
     # Sidebar for page selection
-    page = st.sidebar.radio("Select a page", ["Overview", "Life Expectancy Insights", "Disparities and Impact"])
+    page = st.sidebar.radio("Select a page", ["Overview", "Life Expectancy Insights", "Disparities and Impact", "Life Expectancy Predictor"])
+    
+    if page == "Life Expectancy Predictor":
+        pass
+    elif page == "Overview":
+        # Your existing Overview code
+        pass
+    elif page == "Life Expectancy Insights":
+        # Your existing Insights code
+        pass
+    elif page == "Disparities and Impact":
+        # Your existing Disparities code
+        pass
+    
     st.markdown(
     """
     <style>
@@ -470,6 +645,10 @@ def main():
         - Addressing these disparities requires a multi-faceted approach, considering local contexts and needs.
         - Policy interventions should be tailored to the specific challenges faced by each community, as the impact of various factors can differ between regions.
         """)
+
+    elif page == "Life Expectancy Predictor": 
+        predict_life_expectancy()
+        
 
 
 if __name__ == "__main__":
